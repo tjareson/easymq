@@ -25,8 +25,10 @@ manage_users() {
         1)
             echo -n "Enter username to create: "
             read username
+            echo -n "Enter clientID to assign to $username: "
+            read clientID
             echo
-            $MOSQUITTO_CTRL_CMD createClient "$username"
+            $MOSQUITTO_CTRL_CMD createClient "$username" -c "$clientID"
             ;;
         2)
             echo "Fetching list of users..."
@@ -192,7 +194,7 @@ manage_roles() {
         3)
             $MOSQUITTO_CTRL_CMD listRoles
             ;;
-	 4)
+         4)
             echo "Select a user to assign a role to:"
             users=$($MOSQUITTO_CTRL_CMD listClients)
             IFS=$'\n' read -rd '' -a user_array <<< "$users"
@@ -278,7 +280,7 @@ manage_acls() {
 
     case $option in
     1)
-	echo "Fetching list of roles..."
+        echo "Fetching list of roles..."
         roles=$($MOSQUITTO_CTRL_CMD listRoles)
         if [ -z "$roles" ]; then
             echo "No roles found."
@@ -286,13 +288,13 @@ manage_acls() {
         fi
 
         echo "Select the role to add ACL to:"
-            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-	for i in "${!role_array[@]}"; do
-        	echo "$((i+1)). ${role_array[i]}"
-	done
+        IFS=$'\n' read -rd '' -a role_array <<< "$roles"
+        for i in "${!role_array[@]}"; do
+          echo "$((i+1)). ${role_array[i]}"
+        done
 
         read -p "Enter the number of the role: " role_number
-	if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
+        if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
             echo "Invalid selection. Operation cancelled."
             return
         fi
@@ -304,9 +306,9 @@ manage_acls() {
             echo "$((i+1)). ${acl_types[i]}"
         done
 
-	read -p "Enter the number of the ACL type: " acl_type_number
+        read -p "Enter the number of the ACL type: " acl_type_number
         if [[ $acl_type_number -lt 1 || $acl_type_number -gt ${#acl_types[@]} ]]; then
-	    echo "Invalid selection. Operation cancelled."
+            echo "Invalid selection. Operation cancelled."
             return
         fi
         selected_acl_type=${acl_types[$((acl_type_number-1))]}
@@ -353,7 +355,7 @@ manage_acls() {
             selected_role=${role_array[$((role_number-1))]}
 
             echo "Fetching ACLs for role '$selected_role'..."
-	    acls=$($MOSQUITTO_CTRL_CMD getRole "$selected_role" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^\s\{10,\}//' -e 's/^ACLs:\s*//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
+            acls=$($MOSQUITTO_CTRL_CMD getRole "$selected_role" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^\s\{10,\}//' -e 's/^ACLs:\s*//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
 
             if [ -z "$acls" ]; then
                 echo "No ACLs found for this role."
@@ -373,9 +375,9 @@ manage_acls() {
             fi
 
             selected_acl=${acl_array[$((acl_number-1))]}
-	    acl_type=$(echo "$selected_acl" | awk -F' : ' '{print $1}' | xargs)
-	    action=$(echo "$selected_acl" | awk -F' : ' '{print $2}' | xargs)
-	    topic=$(echo "$selected_acl" | awk -F' : ' '{print $3}' | xargs)
+            acl_type=$(echo "$selected_acl" | awk -F' : ' '{print $1}' | xargs)
+            action=$(echo "$selected_acl" | awk -F' : ' '{print $2}' | xargs)
+            topic=$(echo "$selected_acl" | awk -F' : ' '{print $3}' | xargs)
 
 
             read -p "Are you sure you want to remove ACL '$acl_type $topic' from role '$selected_role'? [y/N]: " confirm
@@ -387,11 +389,40 @@ manage_acls() {
             fi
             ;;
         3)
-            $MOSQUITTO_CTRL_CMD listRoles | while read -r role; do
-                echo "Role: $role"
-                $MOSQUITTO_CTRL_CMD getRole "$role"
-                echo
+            roles=$($MOSQUITTO_CTRL_CMD listRoles)
+            if [ -z "$roles" ]; then
+                echo "No roles found."
+                return
+            fi
+
+            echo "Select the role to view ACL from:"
+            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
+            for i in "${!role_array[@]}"; do
+                echo "$((i+1)). ${role_array[i]}"
             done
+
+            read -p "Enter the number of the role: " role_number
+            if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
+                echo "Invalid selection. Operation cancelled."
+                return
+            fi
+
+            selected_role=${role_array[$((role_number-1))]}
+
+            echo "Fetching ACLs for role '$selected_role'..."
+            acls=$($MOSQUITTO_CTRL_CMD getRole "$selected_role" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^\s\{10,\}//' -e 's/^ACLs:\s*//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
+
+            if [ -z "$acls" ]; then
+                echo "No ACLs found for this role."
+                return
+            fi
+
+            echo "Select the ACL to view:"
+            IFS=$'\n' read -rd '' -a acl_array <<< "$acls"
+            for i in "${!acl_array[@]}"; do
+                echo "${acl_array[i]}"
+            done
+
             ;;
         *)
             echo "Invalid option"
@@ -414,4 +445,3 @@ while true; do
     esac
     echo
 done
-
