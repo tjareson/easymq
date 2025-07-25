@@ -15,5 +15,12 @@ sudo apt install whiptail fzf
 ```
 
 MOSQUITTO_CTRL_CMD="mosquitto_ctrl -o /root/.config/mosquitto_ctrl dynsec" needs to be adjusted according to environment. /root/.config/mosquitto_ctrl is my credential file for mosquitto_ctrl.
+In the credential file there need to be:
+```
+-u username
+-P password
+-h server-ip-mosquitto
+```
+
 
 <img width="999" height="567" alt="image" src="https://github.com/user-attachments/assets/a2e33144-01a6-4ce9-9efe-243d8d5dea2a" />
