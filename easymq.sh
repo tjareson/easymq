@@ -8,8 +8,9 @@ select_with_fzf() {
     local list="$1"
     local prompt="$2"
     local fzf_colors="16,bg+:blue,fg+:white,bg:blue,fg:white,info:white,prompt:cyan,pointer:red,marker:red,border:white"
-    # Clear previous output to keep fzf window tidy
-    clear
+    # Clear previous output to keep fzf window tidy. Send output to the terminal
+    # directly so command substitution callers don't capture the escape codes.
+    clear >/dev/tty
     echo "$list" | fzf --prompt="$prompt" --height=40% --border --color="$fzf_colors"
 }
 
