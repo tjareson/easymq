@@ -3,6 +3,15 @@ simple bash script to administrate usernames, roles and ACLs using mosquitto_ctr
 
 Instead of looking up all parameters of mosquitto_ctrl all the time and loose overview what role and acl was set for which mqtt client, this script is more interactive.
 
-Currently supported are administrating users (clients), role and acls. I didn't need groups yet, it's there, but not functional (yet).
+Currently supported operations include managing users (clients), roles and ACLs. Groups can be created and deleted but currently have no functional effect.
 
-MOSQUITTO_CTRL_CMD="mosquitto_ctrl -o /root/.config/mosquitto_ctrl dynsec" needs to be adjusted according to environment. /root/.config/mosquitto_ctrl is my crendetial file for mosquitto_ctrl.
+## Dependencies
+This script relies on `whiptail` for dialog boxes and `fzf` for interactive
+selections. On an Ubuntu server they can be installed with:
+
+```bash
+sudo apt update
+sudo apt install whiptail fzf
+```
+
+MOSQUITTO_CTRL_CMD="mosquitto_ctrl -o /root/.config/mosquitto_ctrl dynsec" needs to be adjusted according to environment. /root/.config/mosquitto_ctrl is my credential file for mosquitto_ctrl.
