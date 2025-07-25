@@ -18,13 +18,13 @@ create_user() {
     local username client_id
     username=$(whiptail --inputbox "Enter username" 8 40 3>&1 1>&2 2>&3) || return
     client_id=$(whiptail --inputbox "Enter client ID for $username" 8 40 3>&1 1>&2 2>&3) || return
-    $MOSQUITTO_CTRL_CMD createClient "$username" -c "$client_id"
+    $MOSQUITTO_CTRL_CMD createClient "$username" -c "$client_id" 2>/dev/null
     whiptail --msgbox "User '$username' created." 8 40
 }
 
 delete_user() {
     local users selected_user
-    users=$($MOSQUITTO_CTRL_CMD listClients)
+    users=$($MOSQUITTO_CTRL_CMD listClients 2>/dev/null)
     if [ -z "$users" ]; then
         whiptail --msgbox "No users found." 8 40
         return
@@ -32,13 +32,13 @@ delete_user() {
     selected_user=$(select_with_fzf "$users" "Delete user > ") || return
     [ -z "$selected_user" ] && return
     whiptail --yesno "Delete user '$selected_user'?" 8 40 || return
-    $MOSQUITTO_CTRL_CMD deleteClient "$selected_user"
+    $MOSQUITTO_CTRL_CMD deleteClient "$selected_user" 2>/dev/null
     whiptail --msgbox "User '$selected_user' deleted." 8 40
 }
 
 list_users() {
     local users tmp
-    users=$($MOSQUITTO_CTRL_CMD listClients)
+    users=$($MOSQUITTO_CTRL_CMD listClients 2>/dev/null)
     if [ -z "$users" ]; then
         whiptail --msgbox "No users found." 8 40
         return
@@ -76,13 +76,13 @@ manage_users_menu() {
 create_group() {
     local group
     group=$(whiptail --inputbox "Enter group name" 8 40 3>&1 1>&2 2>&3) || return
-    $MOSQUITTO_CTRL_CMD createGroup "$group"
+    $MOSQUITTO_CTRL_CMD createGroup "$group" 2>/dev/null
     whiptail --msgbox "Group '$group' created." 8 40
 }
 
 delete_group() {
     local groups selected
-    groups=$($MOSQUITTO_CTRL_CMD listGroups)
+    groups=$($MOSQUITTO_CTRL_CMD listGroups 2>/dev/null)
     if [ -z "$groups" ]; then
         whiptail --msgbox "No groups found." 8 40
         return
@@ -90,13 +90,13 @@ delete_group() {
     selected=$(select_with_fzf "$groups" "Delete group > ") || return
     [ -z "$selected" ] && return
     whiptail --yesno "Delete group '$selected'?" 8 40 || return
-    $MOSQUITTO_CTRL_CMD deleteGroup "$selected"
+    $MOSQUITTO_CTRL_CMD deleteGroup "$selected" 2>/dev/null
     whiptail --msgbox "Group '$selected' deleted." 8 40
 }
 
 list_groups() {
     local groups
-    groups=$($MOSQUITTO_CTRL_CMD listGroups)
+    groups=$($MOSQUITTO_CTRL_CMD listGroups 2>/dev/null)
     if [ -z "$groups" ]; then
         whiptail --msgbox "No groups found." 8 40
     else
@@ -125,22 +125,22 @@ manage_groups_menu() {
 create_role() {
     local role_name existing_roles selected_role_to_copy acls_to_copy acl
     role_name=$(whiptail --inputbox "Enter role name" 8 40 3>&1 1>&2 2>&3) || return
-    $MOSQUITTO_CTRL_CMD createRole "$role_name"
+    $MOSQUITTO_CTRL_CMD createRole "$role_name" 2>/dev/null
     if whiptail --yesno "Copy ACLs from existing role?" 8 40; then
-        existing_roles=$($MOSQUITTO_CTRL_CMD listRoles)
+        existing_roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
         if [ -z "$existing_roles" ]; then
             whiptail --msgbox "No roles available to copy from." 8 40
         else
             selected_role_to_copy=$(select_with_fzf "$existing_roles" "Copy from > ") || true
             if [ -n "$selected_role_to_copy" ]; then
-                acls_to_copy=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role_to_copy" | \
-                    grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+                acls_to_copy=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role_to_copy" 2>/dev/null | \
+                    grep -E '^\s+|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\+//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
                 while read -r acl; do
                     [ -z "$acl" ] && continue
                     acl_type=$(echo "$acl" | awk -F' : ' '{print $1}' | xargs)
                     action=$(echo "$acl" | awk -F' : ' '{print $2}' | xargs)
                     topic=$(echo "$acl" | awk -F' : ' '{print $3}' | xargs)
-                    $MOSQUITTO_CTRL_CMD addRoleACL "$role_name" "$acl_type" "$topic" "$action" 5
+                    $MOSQUITTO_CTRL_CMD addRoleACL "$role_name" "$acl_type" "$topic" "$action" 5 2>/dev/null
                 done <<< "$acls_to_copy"
             fi
         fi
@@ -150,7 +150,7 @@ create_role() {
 
 delete_role() {
     local roles selected
-    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
     if [ -z "$roles" ]; then
         whiptail --msgbox "No roles found." 8 40
         return
@@ -158,13 +158,13 @@ delete_role() {
     selected=$(select_with_fzf "$roles" "Delete role > ") || return
     [ -z "$selected" ] && return
     whiptail --yesno "Delete role '$selected'?" 8 40 || return
-    $MOSQUITTO_CTRL_CMD deleteRole "$selected"
+    $MOSQUITTO_CTRL_CMD deleteRole "$selected" 2>/dev/null
     whiptail --msgbox "Role '$selected' deleted." 8 40
 }
 
 list_roles() {
     local roles
-    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
     if [ -z "$roles" ]; then
         whiptail --msgbox "No roles found." 8 40
     else
@@ -174,15 +174,15 @@ list_roles() {
 
 assign_role_to_user() {
     local users selected_user roles selected_role
-    users=$($MOSQUITTO_CTRL_CMD listClients)
+    users=$($MOSQUITTO_CTRL_CMD listClients 2>/dev/null)
     [ -z "$users" ] && { whiptail --msgbox "No users found." 8 40; return; }
     selected_user=$(select_with_fzf "$users" "Select user > ") || return
     [ -z "$selected_user" ] && return
-    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
     [ -z "$roles" ] && { whiptail --msgbox "No roles found." 8 40; return; }
     selected_role=$(select_with_fzf "$roles" "Assign role > ") || return
     [ -z "$selected_role" ] && return
-    $MOSQUITTO_CTRL_CMD addClientRole "$selected_user" "$selected_role"
+    $MOSQUITTO_CTRL_CMD addClientRole "$selected_user" "$selected_role" 2>/dev/null
     whiptail --msgbox "Role '$selected_role' assigned to '$selected_user'." 8 50
 }
 
@@ -192,7 +192,7 @@ remove_role_from_user() {
     [ -z "$users" ] && { whiptail --msgbox "No users found." 8 40; return; }
     selected_user=$(select_with_fzf "$users" "Select user > ") || return
     [ -z "$selected_user" ] && return
-    roles_lines=$( $MOSQUITTO_CTRL_CMD getClient "$selected_user" | grep -oP '^Roles:\s+\K.*$|^\s{10}\K.*$' )
+    roles_lines=$( $MOSQUITTO_CTRL_CMD getClient "$selected_user" 2>/dev/null | grep -oP '^Roles:\s+\K.*$|^\s+\K.*$' )
     if [ -z "$roles_lines" ]; then
         whiptail --msgbox "User has no roles." 8 40
         return
@@ -200,7 +200,7 @@ remove_role_from_user() {
     selected_role=$(select_with_fzf "$roles_lines" "Remove role > " | awk '{print $1}') || return
     [ -z "$selected_role" ] && return
     whiptail --yesno "Remove role '$selected_role' from '$selected_user'?" 8 50 || return
-    $MOSQUITTO_CTRL_CMD removeClientRole "$selected_user" "$selected_role"
+    $MOSQUITTO_CTRL_CMD removeClientRole "$selected_user" "$selected_role" 2>/dev/null
     whiptail --msgbox "Role '$selected_role' removed from '$selected_user'." 8 50
 }
 
@@ -248,21 +248,21 @@ add_acl() {
         1) action="allow" ;;
         2) action="deny" ;;
     esac
-    $MOSQUITTO_CTRL_CMD addRoleACL "$selected_role" "$acl_type" "$topic" "$action" 5
+    $MOSQUITTO_CTRL_CMD addRoleACL "$selected_role" "$acl_type" "$topic" "$action" 5 2>/dev/null
     whiptail --msgbox "ACL added to '$selected_role'." 8 40
 }
 
 remove_acl() {
     local roles selected_role acls selected_acl acl_type topic
-    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
     if [ -z "$roles" ]; then
         whiptail --msgbox "No roles found." 8 40
         return
     fi
     selected_role=$(select_with_fzf "$roles" "Role > ") || return
     [ -z "$selected_role" ] && return
-    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" | \
-        grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" 2>/dev/null | \
+        grep -E '^\s+|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\+//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
     if [ -z "$acls" ]; then
         whiptail --msgbox "No ACLs found for this role." 8 40
         return
@@ -272,21 +272,21 @@ remove_acl() {
     acl_type=$(echo "$selected_acl" | awk -F' : ' '{print $1}' | xargs)
     topic=$(echo "$selected_acl" | awk -F' : ' '{print $3}' | xargs)
     whiptail --yesno "Remove ACL '$acl_type $topic' from '$selected_role'?" 8 50 || return
-    $MOSQUITTO_CTRL_CMD removeRoleACL "$selected_role" "$acl_type" "$topic"
+    $MOSQUITTO_CTRL_CMD removeRoleACL "$selected_role" "$acl_type" "$topic" 2>/dev/null
     whiptail --msgbox "ACL removed from '$selected_role'." 8 40
 }
 
 list_acls() {
     local roles selected_role acls tmp
-    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    roles=$($MOSQUITTO_CTRL_CMD listRoles 2>/dev/null)
     if [ -z "$roles" ]; then
         whiptail --msgbox "No roles found." 8 40
         return
     fi
     selected_role=$(select_with_fzf "$roles" "Role > ") || return
     [ -z "$selected_role" ] && return
-    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" | \
-        grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" 2>/dev/null | \
+        grep -E '^\s+|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\+//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
     if [ -z "$acls" ]; then
         whiptail --msgbox "No ACLs found for this role." 8 40
         return
