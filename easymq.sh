@@ -201,6 +201,11 @@ manage_roles() {
             done
 
             read -p "Enter the number of the user: " user_number
+            if [[ -z "$user_number" || $user_number -lt 1 || $user_number -gt ${#user_array[@]} ]]; then
+                echo "Invalid selection. Operation cancelled."
+                return
+            fi
+
             selected_user=${user_array[$((user_number-1))]}
             echo "User '$selected_user' currently has the following roles:"
             $MOSQUITTO_CTRL_CMD getClient "$selected_user"
@@ -213,6 +218,11 @@ manage_roles() {
             done
 
             read -p "Enter the number of the role: " role_number
+            if [[ -z "$role_number" || $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
+                echo "Invalid selection. Operation cancelled."
+                return
+            fi
+
             selected_role=${role_array[$((role_number-1))]}
             $MOSQUITTO_CTRL_CMD addClientRole "$selected_user" "$selected_role"
             echo "Role '$selected_role' assigned to user '$selected_user'."
