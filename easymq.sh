@@ -3,455 +3,325 @@
 # Define the mosquitto_ctrl command with options for convenience
 MOSQUITTO_CTRL_CMD="mosquitto_ctrl -o /root/.config/mosquitto_ctrl dynsec"
 
-# Function to display menu options
-show_menu() {
-    echo "1. Manage Users"
-    echo "2. Manage Groups"
-    echo "3. Manage Roles"
-    echo "4. Manage ACLs"
-    echo "5. Exit"
-    echo -n "Please choose an option: "
+# Helper function to select an item from a list using fzf
+select_with_fzf() {
+    local list="$1"
+    local prompt="$2"
+    echo "$list" | fzf --prompt="$prompt" --height=40% --border
 }
 
-# Function to manage users
-manage_users() {
-    echo "1. Create User"
-    echo "2. Delete User"
-    echo "3. List Users"
-    echo -n "Choose an option: "
-    read option
+# ------------------- User Management -------------------
+create_user() {
+    local username client_id
+    username=$(whiptail --inputbox "Enter username" 8 40 3>&1 1>&2 2>&3) || return
+    client_id=$(whiptail --inputbox "Enter client ID for $username" 8 40 3>&1 1>&2 2>&3) || return
+    $MOSQUITTO_CTRL_CMD createClient "$username" -c "$client_id"
+    whiptail --msgbox "User '$username' created." 8 40
+}
 
-    case $option in
-        1)
-            echo -n "Enter username to create: "
-            read username
-            echo -n "Enter clientID to assign to $username: "
-            read clientID
-            echo
-            $MOSQUITTO_CTRL_CMD createClient "$username" -c "$clientID"
-            ;;
-        2)
-            echo "Fetching list of users..."
-            users=$($MOSQUITTO_CTRL_CMD listClients)
-            if [ -z "$users" ]; then
-                echo "No users found."
-                return
-            fi
-
-            echo "Select the user to delete:"
-            IFS=$'\n' read -rd '' -a user_array <<< "$users"
-            for i in "${!user_array[@]}"; do
-                echo "$((i+1)). ${user_array[i]}"
-            done
-
-            read -p "Enter the number of the user to delete: " user_number
-            if [[ $user_number -lt 1 || $user_number -gt ${#user_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_user=${user_array[$((user_number-1))]}
-            read -p "Are you sure you want to delete user '$selected_user'? [y/N]: " confirm
-            if [[ $confirm =~ ^[Yy]$ ]]; then
-                $MOSQUITTO_CTRL_CMD deleteClient "$selected_user"
-                echo "User '$selected_user' deleted."
-            else
-                echo "Operation cancelled."
-            fi
-            ;;
-3)
-    echo "Fetching list of users and their details..."
+delete_user() {
+    local users selected_user
     users=$($MOSQUITTO_CTRL_CMD listClients)
     if [ -z "$users" ]; then
-        echo "No users found."
+        whiptail --msgbox "No users found." 8 40
         return
     fi
-
-    IFS=$'\n' read -rd '' -a user_array <<< "$users"
-    for user in "${user_array[@]}"; do
-        echo "User: $user"
-        # Displaying the complete output from getClient for each user
-        $MOSQUITTO_CTRL_CMD getClient "$user"
-    done
-    ;;
-
-        *)
-            echo "Invalid option"
-            ;;
-    esac
+    selected_user=$(select_with_fzf "$users" "Delete user > ") || return
+    [ -z "$selected_user" ] && return
+    whiptail --yesno "Delete user '$selected_user'?" 8 40 || return
+    $MOSQUITTO_CTRL_CMD deleteClient "$selected_user"
+    whiptail --msgbox "User '$selected_user' deleted." 8 40
 }
 
-# Function to manage groups
-manage_groups() {
-    echo "1. Create Group"
-    echo "2. Delete Group"
-    echo "3. List Groups"
-    echo -n "Choose an option: "
-    read option
-
-    case $option in
-        1)
-            echo -n "Enter group name to create: "
-            read group_name
-            $MOSQUITTO_CTRL_CMD createGroup "$group_name"
-            ;;
-        2)
-            echo -n "Enter group name to delete: "
-            read group_name
-            $MOSQUITTO_CTRL_CMD deleteGroup "$group_name"
-            ;;
-        3)
-            $MOSQUITTO_CTRL_CMD listGroups
-            ;;
-        *)
-            echo "Invalid option"
-            ;;
-    esac
-}
-
-# Function to manage roles
-manage_roles() {
-    echo "1. Create Role"
-    echo "2. Delete Role"
-    echo "3. List Roles"
-    echo "4. Assign Role to User"
-    echo "5. Remove Role from User"
-    echo -n "Choose an option: "
-    read option
-
-    case $option in
-1)
-    echo -n "Enter role name to create: "
-    read role_name
-    $MOSQUITTO_CTRL_CMD createRole "$role_name"
-
-    read -p "Do you want to copy ACLs from an existing role? [y/N]: " copy_acl_confirm
-    if [[ $copy_acl_confirm =~ ^[Yy]$ ]]; then
-        echo "Fetching list of existing roles..."
-        roles=$($MOSQUITTO_CTRL_CMD listRoles)
-        if [ -z "$roles" ]; then
-            echo "No existing roles found."
-            return
-        fi
-
-        echo "Select a role to copy ACLs from:"
-        IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-        for i in "${!role_array[@]}"; do
-            echo "$((i+1)). ${role_array[i]}"
-        done
-
-        read -p "Enter the number of the role: " role_number
-        if [[ -z "$role_number" || $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-            echo "Invalid selection. Operation cancelled."
-            return
-        fi
-
-        selected_role_to_copy=${role_array[$((role_number-1))]}
-        echo "Copying ACLs from role '$selected_role_to_copy' to '$role_name'..."
-
-        # Adjusted parsing logic to include the first ACL
-        acls_to_copy=$($MOSQUITTO_CTRL_CMD getRole "$selected_role_to_copy" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
-        IFS=$'\n' read -rd '' -a acl_array <<< "$acls_to_copy"
-        for acl in "${acl_array[@]}"; do
-            acl_type=$(echo "$acl" | awk -F' : ' '{print $1}' | xargs)
-            action=$(echo "$acl" | awk -F' : ' '{print $2}' | xargs)
-            topic=$(echo "$acl" | awk -F' : ' '{print $3}' | xargs)
-            $MOSQUITTO_CTRL_CMD addRoleACL "$role_name" "$acl_type" "$topic" "$action" 5
-        done
-        echo "All ACLs copied to role '$role_name'."
+list_users() {
+    local users tmp
+    users=$($MOSQUITTO_CTRL_CMD listClients)
+    if [ -z "$users" ]; then
+        whiptail --msgbox "No users found." 8 40
+        return
     fi
-    ;;
-
-        2)
-            echo "Fetching list of roles..."
-            roles=$($MOSQUITTO_CTRL_CMD listRoles)
-            if [ -z "$roles" ]; then
-                echo "No roles found."
-                return
-            fi
-
-            echo "Select the role to delete:"
-            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-            for i in "${!role_array[@]}"; do
-                echo "$((i+1)). ${role_array[i]}"
-            done
-
-            read -p "Enter the number of the role to delete: " role_number
-            if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_role=${role_array[$((role_number-1))]}
-            read -p "Are you sure you want to delete role '$selected_role'? [y/N]: " confirm
-            if [[ $confirm =~ ^[Yy]$ ]]; then
-                $MOSQUITTO_CTRL_CMD deleteRole "$selected_role"
-                echo "Role '$selected_role' deleted."
-            else
-                echo "Operation cancelled."
-            fi
-            ;;
-        3)
-            $MOSQUITTO_CTRL_CMD listRoles
-            ;;
-         4)
-            echo "Select a user to assign a role to:"
-            users=$($MOSQUITTO_CTRL_CMD listClients)
-            IFS=$'\n' read -rd '' -a user_array <<< "$users"
-            for i in "${!user_array[@]}"; do
-                echo "$((i+1)). ${user_array[i]}"
-            done
-
-            read -p "Enter the number of the user: " user_number
-            if [[ -z "$user_number" || $user_number -lt 1 || $user_number -gt ${#user_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_user=${user_array[$((user_number-1))]}
-            echo "User '$selected_user' currently has the following roles:"
-            $MOSQUITTO_CTRL_CMD getClient "$selected_user"
-
-            echo "Select a role to assign to the user:"
-            roles=$($MOSQUITTO_CTRL_CMD listRoles)
-            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-            for i in "${!role_array[@]}"; do
-                echo "$((i+1)). ${role_array[i]}"
-            done
-
-            read -p "Enter the number of the role: " role_number
-            if [[ -z "$role_number" || $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_role=${role_array[$((role_number-1))]}
-            $MOSQUITTO_CTRL_CMD addClientRole "$selected_user" "$selected_role"
-            echo "Role '$selected_role' assigned to user '$selected_user'."
-            ;;
-    5)
-        echo "Select a user to remove a role from:"
-        users=$($MOSQUITTO_CTRL_CMD listClients)
-        IFS=$'\n' read -rd '' -a user_array <<< "$users"
-        for i in "${!user_array[@]}"; do
-            echo "$((i+1)). ${user_array[i]}"
-        done
-
-        read -p "Enter the number of the user: " user_number
-        if [[ -z "$user_number" || $user_number -lt 1 || $user_number -gt ${#user_array[@]} ]]; then
-            echo "Invalid selection. Operation cancelled."
-            return
-        fi
-
-        selected_user=${user_array[$((user_number-1))]}
-        echo "User '$selected_user' currently has the following roles:"
-        user_details=$($MOSQUITTO_CTRL_CMD getClient "$selected_user")
-        IFS=$'\n' read -rd '' -a roles_lines <<< "$(echo "$user_details" | grep -oP '^Roles:\s+\K.*$|^          \K.*$')"
-
-        if [ ${#roles_lines[@]} -eq 0 ]; then
-            echo "No roles found for this user."
-            return
-        fi
-
-        for i in "${!roles_lines[@]}"; do
-            role_name=$(echo "${roles_lines[i]}" | awk '{print $1}')
-            echo "$((i+1)). $role_name"
-        done
-
-        read -p "Enter the number of the role to remove: " role_number
-        if [[ -z "$role_number" || $role_number -lt 1 || $role_number -gt ${#roles_lines[@]} ]]; then
-            echo "Invalid selection. Operation cancelled."
-            return
-        fi
-
-        selected_role=$(echo "${roles_lines[$((role_number-1))]}" | awk '{print $1}')
-        read -p "Are you sure you want to remove role '$selected_role' from user '$selected_user'? [y/N]: " confirm
-        if [[ $confirm =~ ^[Yy]$ ]]; then
-            $MOSQUITTO_CTRL_CMD removeClientRole "$selected_user" "$selected_role"
-            echo "Role '$selected_role' removed from user '$selected_user'."
-        else
-            echo "Operation cancelled."
-        fi
-        ;;
-        *)
-            echo "Invalid option"
-            ;;
-    esac
+    tmp=$(mktemp)
+    while read -r user; do
+        echo "User: $user" >> "$tmp"
+        $MOSQUITTO_CTRL_CMD getClient "$user" >> "$tmp"
+        echo >> "$tmp"
+    done <<< "$users"
+    whiptail --scrolltext --textbox "$tmp" 20 70
+    rm -f "$tmp"
 }
 
+manage_users_menu() {
+    while true; do
+        local choice
+        choice=$(whiptail --title "Manage Users" --menu "Choose an option" 15 60 4 \
+            1 "Create User" \
+            2 "Delete User" \
+            3 "List Users" \
+            4 "Back" 3>&1 1>&2 2>&3) || return
+        case $choice in
+            1) create_user ;;
+            2) delete_user ;;
+            3) list_users ;;
+            4) return ;;
+        esac
+    done
+}
 
-# Function to manage ACLs
-manage_acls() {
-    echo "1. Add ACL to Role"
-    echo "2. Remove ACL from Role"
-    echo "3. List ACLs for Roles"
-    echo -n "Choose an option: "
-    read option
+# ------------------- Group Management -------------------
+create_group() {
+    local group
+    group=$(whiptail --inputbox "Enter group name" 8 40 3>&1 1>&2 2>&3) || return
+    $MOSQUITTO_CTRL_CMD createGroup "$group"
+    whiptail --msgbox "Group '$group' created." 8 40
+}
 
-    case $option in
-    1)
-        echo "Fetching list of roles..."
-        roles=$($MOSQUITTO_CTRL_CMD listRoles)
-        if [ -z "$roles" ]; then
-            echo "No roles found."
-            return
+delete_group() {
+    local groups selected
+    groups=$($MOSQUITTO_CTRL_CMD listGroups)
+    if [ -z "$groups" ]; then
+        whiptail --msgbox "No groups found." 8 40
+        return
+    fi
+    selected=$(select_with_fzf "$groups" "Delete group > ") || return
+    [ -z "$selected" ] && return
+    whiptail --yesno "Delete group '$selected'?" 8 40 || return
+    $MOSQUITTO_CTRL_CMD deleteGroup "$selected"
+    whiptail --msgbox "Group '$selected' deleted." 8 40
+}
+
+list_groups() {
+    local groups
+    groups=$($MOSQUITTO_CTRL_CMD listGroups)
+    if [ -z "$groups" ]; then
+        whiptail --msgbox "No groups found." 8 40
+    else
+        whiptail --msgbox "$groups" 20 60
+    fi
+}
+
+manage_groups_menu() {
+    while true; do
+        local choice
+        choice=$(whiptail --title "Manage Groups" --menu "Choose an option" 15 60 4 \
+            1 "Create Group" \
+            2 "Delete Group" \
+            3 "List Groups" \
+            4 "Back" 3>&1 1>&2 2>&3) || return
+        case $choice in
+            1) create_group ;;
+            2) delete_group ;;
+            3) list_groups ;;
+            4) return ;;
+        esac
+    done
+}
+
+# ------------------- Role Management -------------------
+create_role() {
+    local role_name existing_roles selected_role_to_copy acls_to_copy acl
+    role_name=$(whiptail --inputbox "Enter role name" 8 40 3>&1 1>&2 2>&3) || return
+    $MOSQUITTO_CTRL_CMD createRole "$role_name"
+    if whiptail --yesno "Copy ACLs from existing role?" 8 40; then
+        existing_roles=$($MOSQUITTO_CTRL_CMD listRoles)
+        if [ -z "$existing_roles" ]; then
+            whiptail --msgbox "No roles available to copy from." 8 40
+        else
+            selected_role_to_copy=$(select_with_fzf "$existing_roles" "Copy from > ") || true
+            if [ -n "$selected_role_to_copy" ]; then
+                acls_to_copy=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role_to_copy" | \
+                    grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+                while read -r acl; do
+                    [ -z "$acl" ] && continue
+                    acl_type=$(echo "$acl" | awk -F' : ' '{print $1}' | xargs)
+                    action=$(echo "$acl" | awk -F' : ' '{print $2}' | xargs)
+                    topic=$(echo "$acl" | awk -F' : ' '{print $3}' | xargs)
+                    $MOSQUITTO_CTRL_CMD addRoleACL "$role_name" "$acl_type" "$topic" "$action" 5
+                done <<< "$acls_to_copy"
+            fi
         fi
+    fi
+    whiptail --msgbox "Role '$role_name' created." 8 40
+}
 
-        echo "Select the role to add ACL to:"
-        IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-        for i in "${!role_array[@]}"; do
-          echo "$((i+1)). ${role_array[i]}"
-        done
+delete_role() {
+    local roles selected
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    if [ -z "$roles" ]; then
+        whiptail --msgbox "No roles found." 8 40
+        return
+    fi
+    selected=$(select_with_fzf "$roles" "Delete role > ") || return
+    [ -z "$selected" ] && return
+    whiptail --yesno "Delete role '$selected'?" 8 40 || return
+    $MOSQUITTO_CTRL_CMD deleteRole "$selected"
+    whiptail --msgbox "Role '$selected' deleted." 8 40
+}
 
-        read -p "Enter the number of the role: " role_number
-        if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-            echo "Invalid selection. Operation cancelled."
-            return
-        fi
-        selected_role=${role_array[$((role_number-1))]}
+list_roles() {
+    local roles
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    if [ -z "$roles" ]; then
+        whiptail --msgbox "No roles found." 8 40
+    else
+        whiptail --msgbox "$roles" 20 60
+    fi
+}
 
-        echo "Select the ACL type:"
-        declare -a acl_types=("publishClientSend" "publishClientReceive" "subscribeLiteral" "subscribePattern" "unsubscribeLiteral" "unsubscribePattern")
-        for i in "${!acl_types[@]}"; do
-            echo "$((i+1)). ${acl_types[i]}"
-        done
+assign_role_to_user() {
+    local users selected_user roles selected_role
+    users=$($MOSQUITTO_CTRL_CMD listClients)
+    [ -z "$users" ] && { whiptail --msgbox "No users found." 8 40; return; }
+    selected_user=$(select_with_fzf "$users" "Select user > ") || return
+    [ -z "$selected_user" ] && return
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    [ -z "$roles" ] && { whiptail --msgbox "No roles found." 8 40; return; }
+    selected_role=$(select_with_fzf "$roles" "Assign role > ") || return
+    [ -z "$selected_role" ] && return
+    $MOSQUITTO_CTRL_CMD addClientRole "$selected_user" "$selected_role"
+    whiptail --msgbox "Role '$selected_role' assigned to '$selected_user'." 8 50
+}
 
-        read -p "Enter the number of the ACL type: " acl_type_number
-        if [[ $acl_type_number -lt 1 || $acl_type_number -gt ${#acl_types[@]} ]]; then
-            echo "Invalid selection. Operation cancelled."
-            return
-        fi
-        selected_acl_type=${acl_types[$((acl_type_number-1))]}
+remove_role_from_user() {
+    local users selected_user roles_lines selected_role
+    users=$($MOSQUITTO_CTRL_CMD listClients)
+    [ -z "$users" ] && { whiptail --msgbox "No users found." 8 40; return; }
+    selected_user=$(select_with_fzf "$users" "Select user > ") || return
+    [ -z "$selected_user" ] && return
+    roles_lines=$( $MOSQUITTO_CTRL_CMD getClient "$selected_user" | grep -oP '^Roles:\s+\K.*$|^\s{10}\K.*$' )
+    if [ -z "$roles_lines" ]; then
+        whiptail --msgbox "User has no roles." 8 40
+        return
+    fi
+    selected_role=$(select_with_fzf "$roles_lines" "Remove role > " | awk '{print $1}') || return
+    [ -z "$selected_role" ] && return
+    whiptail --yesno "Remove role '$selected_role' from '$selected_user'?" 8 50 || return
+    $MOSQUITTO_CTRL_CMD removeClientRole "$selected_user" "$selected_role"
+    whiptail --msgbox "Role '$selected_role' removed from '$selected_user'." 8 50
+}
 
-        echo "Enter topic filter: "
-        read topic_filter
+manage_roles_menu() {
+    while true; do
+        local choice
+        choice=$(whiptail --title "Manage Roles" --menu "Choose an option" 15 60 6 \
+            1 "Create Role" \
+            2 "Delete Role" \
+            3 "List Roles" \
+            4 "Assign Role to User" \
+            5 "Remove Role from User" \
+            6 "Back" 3>&1 1>&2 2>&3) || return
+        case $choice in
+            1) create_role ;;
+            2) delete_role ;;
+            3) list_roles ;;
+            4) assign_role_to_user ;;
+            5) remove_role_from_user ;;
+            6) return ;;
+        esac
+    done
+}
 
-    echo "Choose action for ACL:"
-    echo "1. Allow"
-    echo "2. Deny"
-    read -p "Select an option (1 for Allow, 2 for Deny): " action_option
+# ------------------- ACL Management -------------------
+add_acl() {
+    local roles selected_role acl_type topic action_option action
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    if [ -z "$roles" ]; then
+        whiptail --msgbox "No roles found." 8 40
+        return
+    fi
+    selected_role=$(select_with_fzf "$roles" "Role > ") || return
+    [ -z "$selected_role" ] && return
+    acl_type=$(whiptail --title "ACL Type" --menu "Select ACL type" 15 60 6 \
+        "publishClientSend" "publishClientSend" \
+        "publishClientReceive" "publishClientReceive" \
+        "subscribeLiteral" "subscribeLiteral" \
+        "subscribePattern" "subscribePattern" \
+        "unsubscribeLiteral" "unsubscribeLiteral" \
+        "unsubscribePattern" "unsubscribePattern" 3>&1 1>&2 2>&3) || return
+    topic=$(whiptail --inputbox "Enter topic filter" 8 40 3>&1 1>&2 2>&3) || return
+    action_option=$(whiptail --title "ACL Action" --menu "Allow or Deny" 10 40 2 1 "Allow" 2 "Deny" 3>&1 1>&2 2>&3) || return
     case $action_option in
         1) action="allow" ;;
         2) action="deny" ;;
-        *) echo "Invalid selection. Operation cancelled."
-           return ;;
     esac
-
-    $MOSQUITTO_CTRL_CMD addRoleACL "$selected_role" "$selected_acl_type" "$topic_filter" "$action" 5
-    echo "ACL added to role '$selected_role'."
-    ;;
-
-
-        2)
-            echo "Fetching list of roles..."
-            roles=$($MOSQUITTO_CTRL_CMD listRoles)
-            if [ -z "$roles" ]; then
-                echo "No roles found."
-                return
-            fi
-
-            echo "Select the role to remove ACL from:"
-            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-            for i in "${!role_array[@]}"; do
-                echo "$((i+1)). ${role_array[i]}"
-            done
-
-            read -p "Enter the number of the role: " role_number
-            if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_role=${role_array[$((role_number-1))]}
-
-            echo "Fetching ACLs for role '$selected_role'..."
-            acls=$($MOSQUITTO_CTRL_CMD getRole "$selected_role" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^\s\{10,\}//' -e 's/^ACLs:\s*//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
-
-            if [ -z "$acls" ]; then
-                echo "No ACLs found for this role."
-                return
-            fi
-
-            echo "Select the ACL to remove:"
-            IFS=$'\n' read -rd '' -a acl_array <<< "$acls"
-            for i in "${!acl_array[@]}"; do
-                echo "$((i+1)). ${acl_array[i]}"
-            done
-
-            read -p "Enter the number of the ACL to remove: " acl_number
-            if [[ $acl_number -lt 1 || $acl_number -gt ${#acl_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_acl=${acl_array[$((acl_number-1))]}
-            acl_type=$(echo "$selected_acl" | awk -F' : ' '{print $1}' | xargs)
-            action=$(echo "$selected_acl" | awk -F' : ' '{print $2}' | xargs)
-            topic=$(echo "$selected_acl" | awk -F' : ' '{print $3}' | xargs)
-
-
-            read -p "Are you sure you want to remove ACL '$acl_type $topic' from role '$selected_role'? [y/N]: " confirm
-            if [[ $confirm =~ ^[Yy]$ ]]; then
-                $MOSQUITTO_CTRL_CMD removeRoleACL "$selected_role" "$acl_type" "$topic"
-                echo "ACL '$acl_type $topic' removed from role '$selected_role'."
-            else
-                echo "Operation cancelled."
-            fi
-            ;;
-        3)
-            roles=$($MOSQUITTO_CTRL_CMD listRoles)
-            if [ -z "$roles" ]; then
-                echo "No roles found."
-                return
-            fi
-
-            echo "Select the role to view ACL from:"
-            IFS=$'\n' read -rd '' -a role_array <<< "$roles"
-            for i in "${!role_array[@]}"; do
-                echo "$((i+1)). ${role_array[i]}"
-            done
-
-            read -p "Enter the number of the role: " role_number
-            if [[ $role_number -lt 1 || $role_number -gt ${#role_array[@]} ]]; then
-                echo "Invalid selection. Operation cancelled."
-                return
-            fi
-
-            selected_role=${role_array[$((role_number-1))]}
-
-            echo "Fetching ACLs for role '$selected_role'..."
-            acls=$($MOSQUITTO_CTRL_CMD getRole "$selected_role" | grep -E '^\s{10,}|^ACLs:' | sed -e 's/^\s\{10,\}//' -e 's/^ACLs:\s*//' -e 's/\(priority: [0-9]\+\)//' -e 's/()//')
-
-            if [ -z "$acls" ]; then
-                echo "No ACLs found for this role."
-                return
-            fi
-
-            echo "Select the ACL to view:"
-            IFS=$'\n' read -rd '' -a acl_array <<< "$acls"
-            for i in "${!acl_array[@]}"; do
-                echo "${acl_array[i]}"
-            done
-
-            ;;
-        *)
-            echo "Invalid option"
-            ;;
-    esac
+    $MOSQUITTO_CTRL_CMD addRoleACL "$selected_role" "$acl_type" "$topic" "$action" 5
+    whiptail --msgbox "ACL added to '$selected_role'." 8 40
 }
 
+remove_acl() {
+    local roles selected_role acls selected_acl acl_type topic
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    if [ -z "$roles" ]; then
+        whiptail --msgbox "No roles found." 8 40
+        return
+    fi
+    selected_role=$(select_with_fzf "$roles" "Role > ") || return
+    [ -z "$selected_role" ] && return
+    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" | \
+        grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+    if [ -z "$acls" ]; then
+        whiptail --msgbox "No ACLs found for this role." 8 40
+        return
+    fi
+    selected_acl=$(select_with_fzf "$acls" "Remove ACL > ") || return
+    [ -z "$selected_acl" ] && return
+    acl_type=$(echo "$selected_acl" | awk -F' : ' '{print $1}' | xargs)
+    topic=$(echo "$selected_acl" | awk -F' : ' '{print $3}' | xargs)
+    whiptail --yesno "Remove ACL '$acl_type $topic' from '$selected_role'?" 8 50 || return
+    $MOSQUITTO_CTRL_CMD removeRoleACL "$selected_role" "$acl_type" "$topic"
+    whiptail --msgbox "ACL removed from '$selected_role'." 8 40
+}
 
-# Main loop
+list_acls() {
+    local roles selected_role acls tmp
+    roles=$($MOSQUITTO_CTRL_CMD listRoles)
+    if [ -z "$roles" ]; then
+        whiptail --msgbox "No roles found." 8 40
+        return
+    fi
+    selected_role=$(select_with_fzf "$roles" "Role > ") || return
+    [ -z "$selected_role" ] && return
+    acls=$( $MOSQUITTO_CTRL_CMD getRole "$selected_role" | \
+        grep -E '^\s{10,}|^ACLs:' | sed -e 's/^ACLs:\s*//' -e 's/^\s\{10,\}//' -e 's/(priority: [0-9]\+)//' -e 's/()//' )
+    if [ -z "$acls" ]; then
+        whiptail --msgbox "No ACLs found for this role." 8 40
+        return
+    fi
+    tmp=$(mktemp)
+    echo "$acls" > "$tmp"
+    whiptail --scrolltext --textbox "$tmp" 20 70
+    rm -f "$tmp"
+}
+
+manage_acls_menu() {
+    while true; do
+        local choice
+        choice=$(whiptail --title "Manage ACLs" --menu "Choose an option" 15 60 4 \
+            1 "Add ACL to Role" \
+            2 "Remove ACL from Role" \
+            3 "List ACLs for Role" \
+            4 "Back" 3>&1 1>&2 2>&3) || return
+        case $choice in
+            1) add_acl ;;
+            2) remove_acl ;;
+            3) list_acls ;;
+            4) return ;;
+        esac
+    done
+}
+
+# ------------------- Main Menu -------------------
 while true; do
-    show_menu
-    read choice
+    choice=$(whiptail --title "EasyMQ" --menu "Select an option" 15 60 5 \
+        1 "Manage Users" \
+        2 "Manage Groups" \
+        3 "Manage Roles" \
+        4 "Manage ACLs" \
+        5 "Exit" 3>&1 1>&2 2>&3) || exit 0
     case $choice in
-        1) manage_users ;;
-        2) manage_groups ;;
-        3) manage_roles ;;
-        4) manage_acls ;;
+        1) manage_users_menu ;;
+        2) manage_groups_menu ;;
+        3) manage_roles_menu ;;
+        4) manage_acls_menu ;;
         5) exit 0 ;;
-        *) echo "Invalid choice, please try again." ;;
     esac
-    echo
 done
