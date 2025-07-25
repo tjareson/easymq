@@ -7,7 +7,12 @@ MOSQUITTO_CTRL_CMD="mosquitto_ctrl -o /root/.config/mosquitto_ctrl dynsec"
 select_with_fzf() {
     local list="$1"
     local prompt="$2"
-    echo "$list" | fzf --prompt="$prompt" --height=40% --border
+    # Clear previous output to keep fzf window tidy
+    clear
+    echo "$list" | \
+        fzf --prompt="$prompt" --height=40% --border \
+            --color=16,bg+:blue,fg+:white,bg:blue,fg:white,\
+info:white,prompt:cyan,pointer:red,marker:red,border:white
 }
 
 # ------------------- User Management -------------------
@@ -42,9 +47,11 @@ list_users() {
     fi
     tmp=$(mktemp)
     while read -r user; do
-        echo "User: $user" >> "$tmp"
-        $MOSQUITTO_CTRL_CMD getClient "$user" >> "$tmp"
-        echo >> "$tmp"
+        {
+            echo "User: $user"
+            $MOSQUITTO_CTRL_CMD getClient "$user"
+            echo
+        } >> "$tmp"
     done <<< "$users"
     whiptail --scrolltext --textbox "$tmp" 20 70
     rm -f "$tmp"
